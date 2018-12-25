@@ -1,13 +1,18 @@
 package main
 
 import (
+	emap "expiredMap/expired_map"
 	"fmt"
 	"time"
 )
 
 
+func print(key interface{}, value interface{}) {
+	fmt.Println("key:", key, "value:", value)
+}
+
 func main () {
-	redis := NewExpiredMap()
+	redis := emap.NewExpiredMap()
 
 	redis.Set(1, 2)
 	fmt.Println("len-1:", redis.Length())

@@ -1,4 +1,4 @@
-package main
+package expired_map
 
 import (
 	"fmt"
@@ -15,7 +15,6 @@ type ExpiredMap struct {
 	m map[interface{}]*val
 	timeMap map[int64][]interface{}
 	lck *sync.Mutex
-	timeMapLck *sync.Mutex
 	stop chan bool
 }
 
@@ -24,7 +23,6 @@ func NewExpiredMap() (*ExpiredMap) {
 		m : make(map[interface{}]*val),
 		lck : new(sync.Mutex),
 		timeMap: make(map[int64][]interface{}),
-		timeMapLck: new(sync.Mutex),
 		stop : make(chan bool),
 	}
 	go e.run()
@@ -81,8 +79,8 @@ func (e *ExpiredMap) SetWithExpired(key, value interface{}, expiredSeconds int64
 		data:        value,
 		expiredTime: expiredTime,
 	}
-	e.timeMapLck.Lock()
-	defer e.timeMapLck.Unlock()
+	//e.timeMapLck.Lock()
+	//defer e.timeMapLck.Unlock()
 	if keys, found := e.timeMap[expiredTime]; found {
 		keys = append(keys, key)
 		e.timeMap[expiredTime] = keys
@@ -169,7 +167,7 @@ func (e *ExpiredMap) Stop () {
 	e.Close()
 }
 
-func (e *ExpiredMap) DoForEach(handler func (interface{}, *val)) {
+func (e *ExpiredMap) DoForEach(handler func (interface{}, interface{})) {
 	e.lck.Lock()
 	defer e.lck.Unlock()
 	for k,v := range e.m {
@@ -177,7 +175,14 @@ func (e *ExpiredMap) DoForEach(handler func (interface{}, *val)) {
 	}
 }
 
-func print(key interface{}, value *val) {
-	fmt.Println("key:", key, "value:", value)
+func (e *ExpiredMap) DoForEachWithBreak (handler func (interface{}, interface{}) bool) {
+	e.lck.Lock()
+	defer e.lck.Unlock()
+	for k,v := range e.m {
+		if handler(k, v) {
+			break
+		}
+	}
 }
+
 
