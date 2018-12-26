@@ -15,6 +15,7 @@ type ExpiredMap struct {
 	m map[interface{}]*val
 	timeMap map[int64][]interface{}
 	lck *sync.Mutex
+	alreadyRun bool
 	stop chan bool
 }
 
@@ -24,8 +25,9 @@ func NewExpiredMap() (*ExpiredMap) {
 		lck : new(sync.Mutex),
 		timeMap: make(map[int64][]interface{}),
 		stop : make(chan bool),
+		alreadyRun: false,
 	}
-	go e.run()
+	//go e.run()
 	return &e
 }
 //background goroutine 主动删除过期的key
@@ -74,6 +76,10 @@ func (e *ExpiredMap) SetWithExpired(key, value interface{}, expiredSeconds int64
 	}
 	e.lck.Lock()
 	defer e.lck.Unlock()
+	if !e.alreadyRun { //lazy:懒启动
+		go e.run()
+		e.alreadyRun = true
+	}
 	expiredTime := time.Now().Unix() + expiredSeconds
 	e.m[key] = &val{
 		data:        value,

@@ -24,7 +24,7 @@ func main () {
 	fmt.Println("len-3:", redis.Length())
 	time.Sleep(time.Millisecond*1000)
 	fmt.Println("TTL-1:", redis.TTL(2))
-	time.Sleep(time.Millisecond*1010)
+	time.Sleep(time.Millisecond*1000)
 	fmt.Println("len-1:", redis.Length())
 
 	redis.SetWithExpired(3, 4, 3)
