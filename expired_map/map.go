@@ -1,131 +1,118 @@
-package expired_map
+package ExpiredMap
 
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 type val struct {
-	data interface{}
+	data        interface{}
 	expiredTime int64
 }
 
+const delChannelCap = 100
+
 type ExpiredMap struct {
-	m map[interface{}]*val
-	timeMap map[int64][]interface{}
-	lck *sync.Mutex
-	alreadyRun bool
-	stop chan bool
+	m        map[interface{}]*val
+	timeMap  map[int64][]interface{}
+	lck      *sync.Mutex
+	stop     chan struct{}
+	needStop int32
 }
 
-func NewExpiredMap() (*ExpiredMap) {
+func NewExpiredMap() *ExpiredMap {
 	e := ExpiredMap{
-		m : make(map[interface{}]*val),
-		lck : new(sync.Mutex),
+		m:       make(map[interface{}]*val),
+		lck:     new(sync.Mutex),
 		timeMap: make(map[int64][]interface{}),
-		stop : make(chan bool),
-		alreadyRun: false,
+		stop:    make(chan struct{}),
 	}
-	//go e.run()
+	atomic.StoreInt32(&e.needStop, 0)
+	go e.run(time.Now().Unix())
 	return &e
 }
+
+type delMsg struct {
+	keys []interface{}
+	t int64
+}
+
 //background goroutine 主动删除过期的key
-//因为删除需要花费时间，这里启动goroutine来删除，但是启动goroutine和now++也需要少量时间，
-//导致数据实际删除时间比应该删除的时间稍晚一些，这个误差我们应该能接受。
-func (e *ExpiredMap) run() {
-	now := time.Now().Unix()
-	t := time.NewTicker(time.Second)
-	del := make(chan []interface{},10)
+//数据实际删除时间比应该删除的时间稍晚一些，这个误差我们应该能接受。
+func (e *ExpiredMap) run(now int64) {
+	t := time.NewTicker(time.Second * 1)
+	delCh := make(chan *delMsg, delChannelCap)
 	go func() {
-		for v:=range del{
-			e.MultiDelete(v)  //todo 应该是list
+		for v := range delCh {
+			if atomic.LoadInt32(&e.needStop) == 1 {
+				fmt.Println("---del stop---")
+				return
+			}
+			e.multiDelete(v.keys, v.t)
 		}
 	}()
 	for {
 		select {
-		case <- t.C:
-			now++   //这里用now++的形式，直接用time.Now().Unix()可能会导致时间跳过，导致key未删除。
-			//fmt.Println("now: ", now, "realNow", time.Now().Unix())
-			if keys, found := e.timeMap[now]; found { //todo delete timeMap
-				del <- keys
+		case <-t.C:
+			now++ //这里用now++的形式，直接用time.Now().Unix()可能会导致时间跳过1s，导致key未删除。
+			if keys, found := e.timeMap[now]; found {
+				delCh <- &delMsg{keys:keys, t:now}
 			}
-		}
-		select {  //不放在同一个select中，防止同时收到两个信号后随机选择导致没有return
-		case <- e.stop:
+		case <-e.stop:
 			fmt.Println("=== STOP ===")
+			atomic.StoreInt32(&e.needStop, 1)
+			delCh <- &delMsg{keys:[]interface{}{}, t:0}
 			return
-		default:
 		}
 	}
-
 }
 
-func (e *ExpiredMap) Set(key, value interface{}) {
-	e.lck.Lock()
-	defer e.lck.Unlock()
-	e.m[key] = &val{
-		data: value,
-		expiredTime: -1,
-	}
-}
-
-func (e *ExpiredMap) SetWithExpired(key, value interface{}, expiredSeconds int64){
-	if expiredSeconds <= 0 {
+func (e *ExpiredMap) Set(key, value interface{}, expireSeconds int64) {
+	if expireSeconds <= 0 {
 		return
 	}
 	e.lck.Lock()
 	defer e.lck.Unlock()
-	if !e.alreadyRun { //lazy:懒启动
-		go e.run()
-		e.alreadyRun = true
-	}
-	expiredTime := time.Now().Unix() + expiredSeconds
+	expiredTime := time.Now().Unix() + expireSeconds
 	e.m[key] = &val{
 		data:        value,
 		expiredTime: expiredTime,
 	}
-	//e.timeMapLck.Lock()
-	//defer e.timeMapLck.Unlock()
-	if keys, found := e.timeMap[expiredTime]; found {
-		keys = append(keys, key)
-		e.timeMap[expiredTime] = keys
-	} else {
-		keys = append(keys, key)
-		e.timeMap[expiredTime] = keys
-	}
+	e.timeMap[expiredTime] = append(e.timeMap[expiredTime], key) //过期时间作为key，放在map中
 }
 
-//
-func (e *ExpiredMap) Get(key interface{}) (interface{}){
+func (e *ExpiredMap) Get(key interface{}) (found bool, value interface{}) {
 	e.lck.Lock()
 	defer e.lck.Unlock()
-	if value, found := e.m[key]; found {
-		return value.data
+	if found = e.checkDeleteKey(key); !found {
+		return
 	}
-	return nil
+	value = e.m[key].data
+	return
 }
 
 func (e *ExpiredMap) Delete(key interface{}) {
 	e.lck.Lock()
-	defer e.lck.Unlock()
 	delete(e.m, key)
+	e.lck.Unlock()
 }
 
-func (e *ExpiredMap) MultiDelete(keys []interface{}) {
+func (e *ExpiredMap) Remove(key interface{}) {
+	e.Delete(key)
+}
+
+func (e *ExpiredMap) multiDelete(keys []interface{}, t int64) {
 	e.lck.Lock()
 	defer e.lck.Unlock()
-	var t int64
+	delete(e.timeMap, t)
 	for _, key := range keys {
-		if v, found := e.m[key]; found {
-			t = v.expiredTime
-			delete(e.m, key)
-		}
+		delete(e.m, key)
 	}
-	delete(e.timeMap,t)
 }
 
-func (e *ExpiredMap) Length() int {
+func (e *ExpiredMap) Length() int { //结果是不准确的，因为有未删除的key
 	e.lck.Lock()
 	defer e.lck.Unlock()
 	return len(e.m)
@@ -135,23 +122,14 @@ func (e *ExpiredMap) Size() int {
 	return e.Length()
 }
 
-//返回key的剩余生存时间 key不存在返回-2，key没有设置生存时间返回-1
-func (e *ExpiredMap) TTL (key interface{}) int64 {
+//返回key的剩余生存时间 key不存在返回负数
+func (e *ExpiredMap) TTL(key interface{}) int64 {
 	e.lck.Lock()
 	defer e.lck.Unlock()
-	if value, found := e.m[key]; found {
-		if value.expiredTime == -1 {
-			return -1
-		}
-		now := time.Now().Unix()
-		if value.expiredTime - now < 0 {
-			go e.Delete(key)
-			return -2
-		}
-		return value.expiredTime - now
-	} else {
-		return -2
+	if !e.checkDeleteKey(key) {
+		return -1
 	}
+	return e.m[key].expiredTime - time.Now().Unix()
 }
 
 func (e *ExpiredMap) Clear() {
@@ -161,34 +139,50 @@ func (e *ExpiredMap) Clear() {
 	e.timeMap = make(map[int64][]interface{})
 }
 
-func (e *ExpiredMap) Close () {
+func (e *ExpiredMap) Close() {// todo 关闭后在使用怎么处理
 	e.lck.Lock()
 	defer e.lck.Unlock()
-	e.m = nil
-	e.timeMap = nil
-	e.stop <- true
+	e.stop <- struct{}{}
+	//e.m = nil
+	//e.timeMap = nil
 }
 
-func (e *ExpiredMap) Stop () {
+func (e *ExpiredMap) Stop() {
 	e.Close()
 }
 
-func (e *ExpiredMap) DoForEach(handler func (interface{}, interface{})) {
+func (e *ExpiredMap) DoForEach(handler func(interface{}, interface{})) {
 	e.lck.Lock()
 	defer e.lck.Unlock()
-	for k,v := range e.m {
+	for k, v := range e.m {
+		if !e.checkDeleteKey(k) {
+			continue
+		}
 		handler(k, v)
 	}
 }
 
-func (e *ExpiredMap) DoForEachWithBreak (handler func (interface{}, interface{}) bool) {
+func (e *ExpiredMap) DoForEachWithBreak(handler func(interface{}, interface{}) bool) {
 	e.lck.Lock()
 	defer e.lck.Unlock()
-	for k,v := range e.m {
+	for k, v := range e.m {
+		if !e.checkDeleteKey(k) {
+			continue
+		}
 		if handler(k, v) {
 			break
 		}
 	}
 }
 
-
+func (e *ExpiredMap) checkDeleteKey(key interface{}) bool {
+	if val, found := e.m[key]; found {
+		if val.expiredTime <= time.Now().Unix() {
+			delete(e.m, key)
+			//delete(e.timeMap, val.expiredTime)
+			return false
+		}
+		return true
+	}
+	return false
+}

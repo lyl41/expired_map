@@ -6,31 +6,36 @@ import (
 	"time"
 )
 
-
-func print(key interface{}, value interface{}) {
-	fmt.Println("key:", key, "value:", value)
-}
-
 func main () {
-	redis := emap.NewExpiredMap()
+	cache := emap.NewExpiredMap()
 
-	redis.Set(1, 2)
-	fmt.Println("len-1:", redis.Length())
-	redis.DoForEach(print)
+	cache.Set(1, 1, 10)
+	fmt.Println(cache.Get(1))
+	time.Sleep(time.Second)
+	fmt.Println(cache.Get(1))
+	fmt.Println(cache.TTL(1))
 
-	redis.SetWithExpired(2, 3, 2)
-	redis.SetWithExpired(3, 4, 2)
-	redis.DoForEach(print)
-	fmt.Println("len-3:", redis.Length())
-	time.Sleep(time.Millisecond*1000)
-	fmt.Println("TTL-1:", redis.TTL(2))
-	time.Sleep(time.Millisecond*1000)
-	fmt.Println("len-1:", redis.Length())
+	cache.Delete(1)
+	fmt.Println(cache.Get(1))
 
-	redis.SetWithExpired(3, 4, 3)
-	fmt.Println("len-2:", redis.Length())
+	fmt.Println(cache.TTL(1))
 
 
-	redis.Stop()
+	time.Sleep(time.Millisecond * 10)
+
+	for i := 1; i <= 10; i++ {
+		cache.Set(i, i, int64(i))
+	}
+	for i := 1; i <=10; i++ {
+		cache.DoForEach(foreach)
+		fmt.Println("==========")
+		time.Sleep(time.Second)
+	}
+
 }
+
+func foreach(key interface{}, val interface{}) {
+	fmt.Println("key", key, "val", val)
+}
+
 
