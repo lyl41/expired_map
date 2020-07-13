@@ -3,7 +3,6 @@ package ExpiredMap
 import (
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -15,55 +14,49 @@ type val struct {
 const delChannelCap = 100
 
 type ExpiredMap struct {
-	m        map[interface{}]*val
-	timeMap  map[int64][]interface{}
-	lck      *sync.Mutex
-	stop     chan struct{}
-	needStop int32
+	m       map[interface{}]*val
+	timeMap map[int64][]interface{}
+	lck     *sync.Mutex
+	stop    chan struct{}
 }
 
-func NewExpiredMap() *ExpiredMap {
+func NewExpiredMap(maxCap int) *ExpiredMap {
 	e := ExpiredMap{
 		m:       make(map[interface{}]*val),
 		lck:     new(sync.Mutex),
 		timeMap: make(map[int64][]interface{}),
 		stop:    make(chan struct{}),
 	}
-	atomic.StoreInt32(&e.needStop, 0)
 	go e.run(time.Now().Unix())
 	return &e
 }
 
 type delMsg struct {
 	keys []interface{}
-	t int64
+	t    int64
 }
 
 //background goroutine 主动删除过期的key
-//数据实际删除时间比应该删除的时间稍晚一些，这个误差我们应该能接受。
+//数据实际删除时间比应该删除的时间稍晚一些，这个误差会在查询的时候被解决。
 func (e *ExpiredMap) run(now int64) {
 	t := time.NewTicker(time.Second * 1)
 	delCh := make(chan *delMsg, delChannelCap)
 	go func() {
 		for v := range delCh {
-			if atomic.LoadInt32(&e.needStop) == 1 {
-				fmt.Println("---del stop---")
-				return
-			}
 			e.multiDelete(v.keys, v.t)
 		}
+		fmt.Println("---del stop---")
 	}()
 	for {
 		select {
 		case <-t.C:
 			now++ //这里用now++的形式，直接用time.Now().Unix()可能会导致时间跳过1s，导致key未删除。
 			if keys, found := e.timeMap[now]; found {
-				delCh <- &delMsg{keys:keys, t:now}
+				delCh <- &delMsg{keys: keys, t: now}
 			}
 		case <-e.stop:
+			close(delCh)
 			fmt.Println("=== STOP ===")
-			atomic.StoreInt32(&e.needStop, 1)
-			delCh <- &delMsg{keys:[]interface{}{}, t:0}
 			return
 		}
 	}
@@ -139,7 +132,7 @@ func (e *ExpiredMap) Clear() {
 	e.timeMap = make(map[int64][]interface{})
 }
 
-func (e *ExpiredMap) Close() {// todo 关闭后在使用怎么处理
+func (e *ExpiredMap) Close() { // todo 关闭后在使用怎么处理
 	e.lck.Lock()
 	defer e.lck.Unlock()
 	e.stop <- struct{}{}
