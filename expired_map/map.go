@@ -20,7 +20,7 @@ type ExpiredMap struct {
 	stop    chan struct{}
 }
 
-func NewExpiredMap(maxCap int) *ExpiredMap {
+func NewExpiredMap() *ExpiredMap {
 	e := ExpiredMap{
 		m:       make(map[interface{}]*val),
 		lck:     new(sync.Mutex),
