@@ -1,13 +1,13 @@
-package main
+package expire_map
 
 import (
-	emap "expiredMap/expired_map"
 	"fmt"
+	"testing"
 	"time"
 )
 
-func main () {
-	cache := emap.NewExpiredMap()
+func Test_Emap(t *testing.T) {
+	cache := NewExpiredMap()
 
 	for i := 1; i <= 10; i++ {
 		cache.Set(i, i, int64(i))
@@ -18,7 +18,7 @@ func main () {
 	for i := 1; i <= 100; i++ {
 		cache.Set(10+i, 8, 5)
 	}
-	for i := 1; i <=10; i++ {
+	for i := 1; i <= 10; i++ {
 		cache.DoForEach(foreach)
 		fmt.Println("==========")
 		time.Sleep(time.Second)
@@ -34,5 +34,3 @@ func foreach(key interface{}, val interface{}) {
 	}
 	fmt.Println("key", k, "val", val)
 }
-
-

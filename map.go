@@ -1,4 +1,4 @@
-package ExpiredMap
+package expire_map
 
 import (
 	"sync"
