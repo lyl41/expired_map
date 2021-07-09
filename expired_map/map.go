@@ -1,7 +1,6 @@
 package ExpiredMap
 
 import (
-	"fmt"
 	"sync"
 	"time"
 )
@@ -40,12 +39,12 @@ type delMsg struct {
 //数据实际删除时间比应该删除的时间稍晚一些，这个误差会在查询的时候被解决。
 func (e *ExpiredMap) run(now int64) {
 	t := time.NewTicker(time.Second * 1)
+	defer t.Stop()
 	delCh := make(chan *delMsg, delChannelCap)
 	go func() {
 		for v := range delCh {
 			e.multiDelete(v.keys, v.t)
 		}
-		fmt.Println("---del stop---")
 	}()
 	for {
 		select {
@@ -56,7 +55,6 @@ func (e *ExpiredMap) run(now int64) {
 			}
 		case <-e.stop:
 			close(delCh)
-			fmt.Println("=== STOP ===")
 			return
 		}
 	}
