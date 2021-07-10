@@ -50,8 +50,12 @@ func (e *ExpiredMap) run(now int64) {
 		select {
 		case <-t.C:
 			now++ //这里用now++的形式，直接用time.Now().Unix()可能会导致时间跳过1s，导致key未删除。
+			e.lck.Lock()
 			if keys, found := e.timeMap[now]; found {
+				e.lck.Unlock()
 				delCh <- &delMsg{keys: keys, t: now}
+			} else {
+				e.lck.Unlock()
 			}
 		case <-e.stop:
 			close(delCh)

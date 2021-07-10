@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func Test_Emap(t *testing.T) {
+func Test_Map(t *testing.T) {
 	cache := NewExpiredMap()
 
 	for i := 1; i <= 10; i++ {
@@ -25,6 +25,11 @@ func Test_Emap(t *testing.T) {
 	}
 	cache.Close()
 	time.Sleep(time.Millisecond)
+	for i := 0; i < 1000; i++ {
+		time.Sleep(time.Millisecond * 1)
+		cache.Set(i, i, int64(i))
+		fmt.Println(cache.Get(i))
+	}
 }
 
 func foreach(key interface{}, val interface{}) {
